@@ -1,0 +1,513 @@
+================================================================
+  SISTEMA DE VOTACIONES EN TIEMPO REAL
+  Documentación de Base de Datos y Recomendaciones de Integración
+  PostgreSQL + Java + WebSockets
+================================================================
+
+----------------------------------------------------------------
+1. ARQUITECTURA GENERAL DEL ESQUEMA
+----------------------------------------------------------------
+
+El esquema está diseñado con un principio clave: la base de datos
+es la última línea de defensa. No se confía ciegamente en que la
+capa de aplicación Java valide todo correctamente. Cada regla de
+negocio crítica tiene su propio respaldo en la base de datos
+mediante constraints, triggers o tipos ENUM.
+
+Esto es especialmente importante en sistemas con WebSockets, donde
+múltiples clientes pueden enviar peticiones simultáneas y las
+condiciones de carrera (race conditions) son un riesgo real.
+
+Tablas del sistema:
+
+  usuarios   → Personas que interactúan con el sistema (admin o usuario)
+  encuestas  → Encuestas creadas y gestionadas por administradores
+  opciones   → Opciones de respuesta asociadas a cada encuesta
+  votos      → Registro inmutable de cada voto emitido
+
+Relaciones principales:
+
+  encuestas  ──(creado_por)──▶  usuarios
+  opciones   ──(encuesta_id)──▶ encuestas
+  votos      ──(encuesta_id)──▶ encuestas
+  votos      ──(usuario_id)───▶ usuarios
+  votos      ──(opcion_id)────▶ opciones
+
+
+----------------------------------------------------------------
+2. DECISIONES DE DISEÑO EXPLICADAS
+----------------------------------------------------------------
+
+2.1 UUIDs como claves primarias
+────────────────────────────────
+Se eligió UUID (gen_random_uuid()) en lugar de SERIAL/BIGSERIAL
+por tres razones concretas:
+
+  a) En un sistema con WebSockets, el cliente puede necesitar
+     conocer el ID de un recurso antes de confirmarlo en el
+     servidor (optimistic UI). Con UUID se puede generar el ID
+     en el cliente y luego confirmarlo.
+
+  b) Evita la enumeración de recursos. Con IDs secuenciales
+     (1, 2, 3...) un atacante puede iterar sobre todos los
+     registros fácilmente. Los UUIDs son impredecibles.
+
+  c) En arquitecturas distribuidas o con réplicas, los UUIDs
+     no colisionan entre nodos. Los secuenciales sí lo harían.
+
+2.2 ENUM nativos de PostgreSQL
+───────────────────────────────
+user_role    → 'admin', 'usuario'
+survey_status → 'borrador', 'activa', 'finalizada'
+
+Usar ENUMs en lugar de VARCHAR libres o tablas de lookup tiene
+ventajas concretas:
+
+  - PostgreSQL rechaza cualquier valor fuera del ENUM en el
+    momento del INSERT/UPDATE, sin importar lo que haga Java.
+  - Ocupa menos espacio en disco que VARCHAR.
+  - Las consultas con filtros sobre ENUMs se optimizan mejor.
+
+ATENCIÓN: Agregar valores a un ENUM en PostgreSQL requiere
+ALTER TYPE ... ADD VALUE, que en versiones anteriores a la 12
+no podía ejecutarse dentro de una transacción. Planifica los
+valores del ENUM con cuidado desde el inicio.
+
+2.3 Soft delete en usuarios
+────────────────────────────
+La columna "activo BOOLEAN DEFAULT TRUE" permite deshabilitar
+usuarios sin borrar su historial de votos. Si se borrara un
+usuario con DELETE, las claves foráneas en "votos" lo
+impedirían (ON DELETE RESTRICT), o peor, se perderían los votos
+si se usara ON DELETE CASCADE.
+
+Nunca borres usuarios físicamente. Siempre usa: UPDATE usuarios SET activo = FALSE WHERE id = '...';
+
+2.4 Columnas de ciclo de vida en encuestas
+───────────────────────────────────────────
+  creado_en     → Cuándo se creó la encuesta
+  activada_en   → Cuándo pasó a estado 'activa' (seteado por trigger)
+  finalizada_en → Cuándo fue finalizada (seteado por trigger)
+  actualizado_en → Última modificación (seteado por trigger automáticamente)
+
+Estas columnas se rellenan automáticamente mediante el trigger
+trg_encuestas_estado. Tu código Java no necesita enviarlas;
+si las envías igualmente, el trigger las sobreescribirá.
+
+Son útiles para auditoría, métricas (¿cuánto tiempo estuvo activa
+una encuesta?) y para mostrar en el frontend cuándo finalizó.
+
+
+----------------------------------------------------------------
+3. LAS REGLAS DE NEGOCIO Y CÓMO SE APLICAN
+----------------------------------------------------------------
+
+3.1 Flujo de estados: borrador → activa → finalizada
+──────────────────────────────────────────────────────
+Este es el flujo ÚNICO y UNIDIRECCIONAL. No hay vuelta atrás.
+
+  PERMITIDO:    borrador → activa
+  PERMITIDO:    activa   → finalizada
+  BLOQUEADO:    activa   → borrador      (el trigger lanza excepción)
+  BLOQUEADO:    finalizada → cualquier   (el trigger lanza excepción)
+  BLOQUEADO:    borrador → finalizada    (saltar un estado, bloqueado)
+
+El trigger trg_encuestas_estado (función fn_validar_transicion_estado)
+intercepta cualquier UPDATE sobre la columna "estado" y verifica
+que la transición sea válida. Si no lo es, lanza una excepción
+con mensaje descriptivo que tu aplicación Java puede capturar
+y reenviar al cliente WebSocket.
+
+Desde Java (JDBC/JPA), este error llega como PSQLException.
+El mensaje del servidor estará disponible en:
+  e.getServerErrorMessage().getMessage()
+
+3.2 Edición bloqueada fuera del estado borrador
+─────────────────────────────────────────────────
+El trigger trg_encuestas_bloquear_edicion asegura que una
+encuesta solo puede modificarse (título, descripción) cuando
+está en estado 'borrador'.
+
+Esto incluye intentar modificar las OPCIONES de una encuesta
+activa o finalizada: el trigger trg_opciones_bloquear_edicion
+bloquea INSERT, UPDATE y DELETE sobre la tabla "opciones" si
+la encuesta asociada no está en 'borrador'.
+
+Ejemplo de escenario bloqueado:
+  - Encuesta A está en estado 'activa'.
+  - Un admin intenta agregar una nueva opción vía API REST.
+  - PostgreSQL lanza excepción desde el trigger.
+  - Java recibe PSQLException con SQLState P0001 (raise_exception).
+  - El servidor WebSocket notifica al admin: "No se pueden
+    modificar opciones de una encuesta activa."
+
+3.3 Un usuario, un voto por encuesta
+──────────────────────────────────────
+Esta es la restricción más crítica del sistema y se aplica
+en DOS niveles:
+
+  NIVEL 1 - Trigger (fn_validar_voto):
+    Verifica que la encuesta esté activa y que la opción
+    pertenezca realmente a esa encuesta. Previene votos
+    manipulados que envíen un opcion_id de otra encuesta.
+
+  NIVEL 2 - UNIQUE constraint:
+    CONSTRAINT uq_votos_usuario_encuesta UNIQUE (usuario_id, encuesta_id)
+
+    Este es el más importante. Aunque dos peticiones WebSocket
+    lleguen al mismo milisegundo para el mismo usuario y encuesta,
+    PostgreSQL garantiza que solo una de ellas tendrá éxito.
+    La segunda recibirá un error de violación de unicidad.
+
+El trigger valida la lógica; el UNIQUE constraint es el candado
+a nivel de base de datos que no puede ser evadido.
+
+
+----------------------------------------------------------------
+4. TRIGGERS: DETALLE Y ORDEN DE EJECUCIÓN
+----------------------------------------------------------------
+
+Cuando se hace UPDATE sobre "encuestas", los triggers se ejecutan
+en este orden (BEFORE UPDATE):
+
+  1. trg_encuestas_bloquear_edicion  → ¿Se puede editar?
+  2. trg_encuestas_estado            → ¿La transición de estado es válida?
+  3. trg_encuestas_updated_at        → Actualiza actualizado_en
+
+PostgreSQL ejecuta los triggers BEFORE en orden alfabético por
+nombre cuando son del mismo tipo y evento. Por eso los nombres
+fueron elegidos cuidadosamente.
+
+Cuando se hace INSERT sobre "votos":
+
+  1. trg_votos_validar → Verifica encuesta activa + opción válida
+  2. UNIQUE constraint → Verifica que no exista ya un voto del
+                         mismo usuario en la misma encuesta
+
+Si el trigger pasa pero el UNIQUE falla, se lanza PSQLException
+con SQLState '23505'. Ver sección 5.2 para el manejo en Java.
+
+
+----------------------------------------------------------------
+5. INTEGRACIÓN CON JAVA Y WEBSOCKETS
+----------------------------------------------------------------
+
+5.1 Manejo de transacciones con WebSockets
+───────────────────────────────────────────
+En un sistema de WebSockets, cada mensaje del cliente NO debe
+abrir una conexión nueva a la base de datos. Usa un pool de
+conexiones como HikariCP (recomendado para Java):
+
+  HikariConfig config = new HikariConfig();
+  config.setJdbcUrl("jdbc:postgresql://localhost:5432/votaciones");
+  config.setMaximumPoolSize(20);       // Ajustar según carga
+  config.setMinimumIdle(5);
+  config.setConnectionTimeout(30000);  // 30 segundos
+  config.setIdleTimeout(600000);       // 10 minutos
+  HikariDataSource dataSource = new HikariDataSource(config);
+
+Cada handler de mensaje WebSocket obtiene una conexión del pool,
+ejecuta la operación y la devuelve al pool. Nunca mantengas
+una conexión de base de datos abierta mientras esperas
+mensajes WebSocket del cliente.
+
+5.2 Captura de errores de PostgreSQL en Java
+──────────────────────────────────────────────
+PostgreSQL comunica errores al driver JDBC mediante SQLState.
+Los más relevantes para este sistema:
+
+  23505 → unique_violation
+           Se dispara cuando un usuario intenta votar dos veces.
+           La constraint uq_votos_usuario_encuesta lo provoca.
+
+  23503 → foreign_key_violation
+           Se dispara si se intenta votar con un usuario_id,
+           encuesta_id u opcion_id que no existe.
+
+  P0001 → raise_exception
+           Errores lanzados explícitamente por los triggers
+           (transición de estado inválida, encuesta no activa,
+           opción que no pertenece a la encuesta, etc.)
+
+Ejemplo de manejo en Java:
+
+  public void registrarVoto(UUID encuestaId, UUID usuarioId, UUID opcionId)
+      throws VotoException {
+      
+      String sql = "INSERT INTO votos (encuesta_id, usuario_id, opcion_id) "
+                 + "VALUES (?, ?, ?)";
+      
+      try (Connection conn = dataSource.getConnection();
+           PreparedStatement ps = conn.prepareStatement(sql)) {
+          
+          ps.setObject(1, encuestaId);
+          ps.setObject(2, usuarioId);
+          ps.setObject(3, opcionId);
+          ps.executeUpdate();
+          
+      } catch (PSQLException e) {
+          switch (e.getSQLState()) {
+              case "23505":
+                  // El usuario ya votó en esta encuesta
+                  throw new VotoException("Ya has votado en esta encuesta.", e);
+              
+              case "23503":
+                  // Referencia inválida (encuesta, usuario u opción no existe)
+                  throw new VotoException("Datos de voto inválidos.", e);
+              
+              case "P0001":
+                  // Error de trigger: encuesta no activa, opción inválida, etc.
+                  // El mensaje viene del RAISE EXCEPTION del trigger
+                  throw new VotoException(e.getServerErrorMessage().getMessage(), e);
+              
+              default:
+                  throw new VotoException("Error al registrar el voto.", e);
+          }
+      }
+  }
+
+5.3 Notificación en tiempo real con LISTEN/NOTIFY
+───────────────────────────────────────────────────
+PostgreSQL tiene un mecanismo nativo de pub/sub llamado
+LISTEN/NOTIFY que se integra perfectamente con WebSockets.
+
+En lugar de hacer polling desde Java para detectar nuevos votos,
+puedes hacer que PostgreSQL notifique a la aplicación
+automáticamente.
+
+Paso 1 - Crear trigger de notificación:
+
+  CREATE OR REPLACE FUNCTION fn_notificar_nuevo_voto()
+  RETURNS TRIGGER LANGUAGE plpgsql AS $$
+  BEGIN
+      PERFORM pg_notify(
+          'nuevo_voto',
+          json_build_object(
+              'encuesta_id', NEW.encuesta_id,
+              'opcion_id',   NEW.opcion_id
+          )::text
+      );
+      RETURN NEW;
+  END;
+  $$;
+
+  CREATE TRIGGER trg_votos_notify
+      AFTER INSERT ON votos
+      FOR EACH ROW EXECUTE FUNCTION fn_notificar_nuevo_voto();
+
+Paso 2 - Escuchar desde Java con pgjdbc:
+
+  // Hilo dedicado para escuchar notificaciones
+  PGConnection pgConn = conn.unwrap(PGConnection.class);
+  Statement stmt = conn.createStatement();
+  stmt.execute("LISTEN nuevo_voto");
+  stmt.close();
+
+  while (true) {
+      PGNotification[] notifications = pgConn.getNotifications(5000);
+      if (notifications != null) {
+          for (PGNotification notification : notifications) {
+              String payload = notification.getParameter();
+              // Parsear JSON y broadcast a todos los clientes
+              // WebSocket suscritos a esa encuesta
+              broadcastToClients(payload);
+          }
+      }
+  }
+
+Paso 3 - Broadcast desde el handler WebSocket:
+
+  public void broadcastToClients(String payload) {
+      // payload tiene: {"encuesta_id": "...", "opcion_id": "..."}
+      // Consultar los resultados actualizados y enviar
+      ResultadosDTO resultados = obtenerResultados(encuestaId);
+      for (Session session : activeSessions.get(encuestaId)) {
+          session.getAsyncRemote().sendText(toJson(resultados));
+      }
+  }
+
+Con este patrón, cada vez que alguien vota, PostgreSQL notifica
+a Java, y Java reenvía los resultados actualizados a todos los
+clientes WebSocket conectados a esa encuesta. Sin polling.
+
+5.4 Consulta eficiente de resultados en tiempo real
+──────────────────────────────────────────────────────
+Usa la vista v_resultados_encuesta para obtener los conteos
+actualizados después de cada voto:
+
+  SELECT opcion_id, opcion_texto, total_votos, porcentaje
+  FROM   v_resultados_encuesta
+  WHERE  encuesta_id = ?
+  ORDER BY orden;
+
+Esta vista usa una window function (SUM OVER PARTITION) para
+calcular el porcentaje sin subconsultas adicionales. Es eficiente
+y el resultado puede serializarse directamente a JSON para
+enviarlo por WebSocket.
+
+5.5 Verificar si un usuario ya votó (sin intentar insertar)
+──────────────────────────────────────────────────────────────
+Si quieres verificar ANTES de mostrar la pantalla de votación:
+
+  SELECT EXISTS (
+      SELECT 1 FROM votos
+      WHERE  usuario_id  = ?
+      AND    encuesta_id = ?
+  ) AS ya_voto;
+
+Pero ten en cuenta que este check + el INSERT posterior NO son
+atómicos si no están en la misma transacción. Siempre confía
+en el error 23505 como fuente de verdad, y usa este SELECT
+solo para UX preventiva (deshabilitar el botón de votar).
+
+
+----------------------------------------------------------------
+6. CONSULTAS ÚTILES PARA EL BACKEND JAVA
+----------------------------------------------------------------
+
+6.1 Encuestas activas disponibles para votar:
+
+  SELECT id, titulo, descripcion, activada_en
+  FROM   encuestas
+  WHERE  estado = 'activa'
+  ORDER BY activada_en DESC;
+
+6.2 Encuestas finalizadas donde participó un usuario:
+
+  SELECT encuesta_id, encuesta_titulo, opcion_votada, votado_en, finalizada_en
+  FROM   v_participacion_usuario
+  WHERE  usuario_id = ?
+  ORDER BY finalizada_en DESC;
+
+6.3 Todas las opciones de una encuesta:
+
+  SELECT id, texto, orden
+  FROM   opciones
+  WHERE  encuesta_id = ?
+  ORDER BY orden;
+
+6.4 Cambiar estado de una encuesta (admin):
+
+  -- Activar
+  UPDATE encuestas SET estado = 'activa'      WHERE id = ? AND creado_por = ?;
+
+  -- Finalizar
+  UPDATE encuestas SET estado = 'finalizada'  WHERE id = ? AND creado_por = ?;
+
+  -- Siempre incluir creado_por en el WHERE para que un admin
+  -- no pueda modificar encuestas de otro admin.
+
+6.5 Eliminar encuesta (solo en borrador, recomendado):
+
+  -- Las opciones se borran en cascada (ON DELETE CASCADE)
+  -- Los votos están protegidos con RESTRICT, pero una encuesta
+  -- en borrador no tiene votos, así que es seguro.
+  DELETE FROM encuestas
+  WHERE  id = ?
+  AND    estado = 'borrador'
+  AND    creado_por = ?;
+
+  -- Si necesitas eliminar encuestas activas/finalizadas con votos,
+  -- primero borra los votos manualmente (operación administrativa
+  -- que debería requerir confirmación explícita).
+
+
+----------------------------------------------------------------
+7. ÍNDICES Y RENDIMIENTO
+----------------------------------------------------------------
+
+Los índices creados en el esquema cubren los patrones de consulta
+más comunes:
+
+  idx_encuestas_estado      → Filtrar encuestas por estado (activa, etc.)
+  idx_encuestas_creado_por  → Ver encuestas de un admin específico
+  idx_opciones_encuesta_id  → Obtener opciones de una encuesta
+  idx_votos_encuesta_id     → Contar votos por encuesta
+  idx_votos_usuario_id      → Ver historial de votos de un usuario
+  idx_votos_opcion_id       → Contar votos por opción
+
+Para sistemas con alta concurrencia (miles de usuarios votando
+simultáneamente), considera adicionalmente:
+
+  a) Tabla de contadores materializados:
+     En lugar de hacer COUNT(*) en tiempo real, mantener una
+     tabla "contadores_opciones (opcion_id, total)" que se
+     actualiza con un trigger en "votos". Esto hace que la
+     consulta de resultados sea O(1) en lugar de O(n).
+
+  b) Caché de resultados en Redis:
+     Los resultados de una encuesta activa cambian con cada voto.
+     Redis puede actuar como caché con TTL corto (1-2 segundos),
+     reduciendo la carga sobre PostgreSQL en picos de votación.
+
+  c) Particionado de la tabla votos:
+     Si el sistema maneja millones de votos, considera particionar
+     "votos" por encuesta_id o por rango de fechas para mantener
+     el rendimiento de las consultas históricas.
+
+
+----------------------------------------------------------------
+8. SEGURIDAD Y BUENAS PRÁCTICAS
+----------------------------------------------------------------
+
+8.1 Nunca almacenar contraseñas en texto plano
+  Usar bcrypt o Argon2 desde Java antes de guardar en password_hash.
+  Spring Security provee PasswordEncoder con BCryptPasswordEncoder.
+
+8.2 Validar el rol en la capa de aplicación Y en la BD
+  El campo "rol" en la tabla usuarios controla qué puede hacer
+  cada usuario. Pero la validación final debe estar en Java:
+  verificar que el JWT/sesión tenga rol 'admin' antes de llamar
+  a endpoints de gestión de encuestas.
+
+8.3 Usar PreparedStatements siempre
+  Nunca construir SQL con concatenación de strings. Los
+  PreparedStatements previenen SQL injection y PostgreSQL
+  puede reutilizar el plan de ejecución (query plan caching).
+
+8.4 Limitar privilegios del usuario de base de datos
+  Crear un usuario PostgreSQL específico para la aplicación
+  con permisos mínimos:
+
+    CREATE USER app_votaciones WITH PASSWORD 'password_seguro';
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES
+      IN SCHEMA public TO app_votaciones;
+    GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO app_votaciones;
+    -- No otorgar DROP, CREATE, ni superuser.
+
+8.5 Auditoría de cambios de estado
+  Las columnas activada_en y finalizada_en proveen un registro
+  básico. Para auditoría completa, considera una tabla separada:
+
+    CREATE TABLE auditoria_encuestas (
+        id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        encuesta_id  UUID        NOT NULL,
+        usuario_id   UUID        NOT NULL,
+        accion       VARCHAR(50) NOT NULL,  -- 'activada', 'finalizada', 'editada'
+        detalle      JSONB,
+        registrado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+  Y popular esta tabla desde un trigger AFTER UPDATE en encuestas,
+  o desde la capa de aplicación Java.
+
+
+----------------------------------------------------------------
+9. RESUMEN DE SQLSTATEs IMPORTANTES PARA JAVA
+----------------------------------------------------------------
+
+  23505  unique_violation         → Usuario votó dos veces
+  23503  foreign_key_violation    → Referencia a registro inexistente
+  23514  check_violation          → Violación de CHECK constraint
+  23502  not_null_violation       → Campo obligatorio nulo
+  P0001  raise_exception          → Error lanzado por trigger
+  40001  serialization_failure    → Conflicto de transacción (reintentar)
+  40P01  deadlock_detected        → Deadlock (reintentar con backoff)
+
+Para 40001 y 40P01 implementa lógica de reintento con backoff
+exponencial en Java, ya que son errores transitorios esperados
+en sistemas de alta concurrencia.
+
+================================================================
+  FIN DE LA DOCUMENTACIÓN
+================================================================

@@ -4,10 +4,10 @@ spring:
 
   # ── Base de datos ──────────────────────────────────────────
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:votaciones}
-    username: ${DB_USER:}
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:votaciones}?createDatabaseIfNotExist=true&serverTimezone=UTC
+    username: ${DB_USER:root}
     password: ${DB_PASSWORD:12345}
-    driver-class-name: org.postgresql.Driver
+    driver-class-name: com.mysql.cj.jdbc.Driver
 
     hikari:
       pool-name: VotacionesPool

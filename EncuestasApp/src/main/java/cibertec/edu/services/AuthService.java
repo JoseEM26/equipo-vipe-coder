@@ -1,10 +1,12 @@
-package cibertec.edu.auth;
+package cibertec.edu.services;
 
+import cibertec.edu.auth.JwtUtil;
 import cibertec.edu.dto.request.LoginRequest;
 import cibertec.edu.dto.request.RegistroRequest;
 import cibertec.edu.dto.response.AuthResponse;
 import cibertec.edu.exception.ConflictoException;
 import cibertec.edu.exception.CredencialesInvalidasException;
+import cibertec.edu.repo.AuthRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -16,8 +18,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AuthService {
 
-    private final AuthRepository  authRepository;
-    private final JwtUtil         jwtUtil;
+    private final AuthRepository authRepository;
+    private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
 
     @Value("${jwt.expiration-ms}")

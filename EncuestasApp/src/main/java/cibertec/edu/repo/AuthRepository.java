@@ -1,4 +1,4 @@
-package cibertec.edu.auth;
+package cibertec.edu.repo;
 
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -58,19 +58,23 @@ public class AuthRepository {
      * El rol solo puede ser 'admin' si se asigna manualmente en la BD.
      */
     public UUID registrar(String nombre, String email, String passwordHash) {
+        // El id se genera en Java: MySQL no soporta INSERT ... RETURNING y
+        // getGeneratedKeys() no devuelve el DEFAULT (UUID()) de una PK CHAR(36).
+        UUID id = UUID.randomUUID();
+
         String sql = """
-                INSERT INTO usuarios (nombre, email, password_hash, rol)
-                VALUES (:nombre, :email, :passwordHash, 'usuario')
-                RETURNING id
+                INSERT INTO usuarios (id, nombre, email, password_hash, rol)
+                VALUES (:id, :nombre, :email, :passwordHash, 'usuario')
                 """;
 
         var params = new MapSqlParameterSource()
+                .addValue("id",           id.toString())
                 .addValue("nombre",       nombre)
                 .addValue("email",        email)
                 .addValue("passwordHash", passwordHash);
 
-        return jdbc.queryForObject(sql, params, (rs, rowNum) ->
-                UUID.fromString(rs.getString("id")));
+        jdbc.update(sql, params);
+        return id;
     }
 
     // ── Proyección interna ────────────────────────────────────

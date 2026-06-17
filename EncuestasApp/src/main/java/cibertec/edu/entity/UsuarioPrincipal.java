@@ -1,4 +1,4 @@
-package cibertec.edu.auth;
+package cibertec.edu.entity;
 
 import java.util.UUID;
 

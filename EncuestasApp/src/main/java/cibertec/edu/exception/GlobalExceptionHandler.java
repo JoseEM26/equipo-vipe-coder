@@ -8,6 +8,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.UncategorizedSQLException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -58,6 +59,16 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.UNPROCESSABLE_ENTITY)
                 .body(new ErrorResponse(422, "Estado inválido", e.getMessage()));
+    }
+
+    // Acción no permitida según el estado del recurso (p. ej. ver resultados
+    // sin haber votado). Conserva el mensaje específico, a diferencia del
+    // AccessDeniedException de Spring Security (genérico, más abajo).
+    @ExceptionHandler(AccesoDenegadoException.class)
+    public ResponseEntity<ErrorResponse> handleAccesoDenegadoDominio(AccesoDenegadoException e) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(new ErrorResponse(403, "Acceso denegado", e.getMessage()));
     }
 
     // ── Validación de DTOs ────────────────────────────────────
@@ -143,6 +154,17 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new ErrorResponse(500, "Error de base de datos",
                         "Error inesperado en la base de datos"));
+    }
+
+    // ── Acceso denegado (@PreAuthorize) ───────────────────────
+    // AuthorizationDeniedException de Spring Security extiende AccessDeniedException.
+    // Sin este handler, el catch-all de abajo lo convertiría en un 500.
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccesoDenegado(AccessDeniedException e) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(new ErrorResponse(403, "Acceso denegado",
+                        "No tienes permisos para realizar esta acción"));
     }
 
     // ── Fallback general ──────────────────────────────────────

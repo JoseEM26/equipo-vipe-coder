@@ -43,11 +43,26 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
-        <!-- ── Base de datos ── -->
-        <!-- JdbcTemplate viene incluido en spring-boot-starter-jdbc -->
+        <!-- ── SOAP (Spring Web Services, contract-first) ── -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-jdbc</artifactId>
+            <artifactId>spring-boot-starter-web-services</artifactId>
+        </dependency>
+        <!-- Generación del WSDL a partir del XSD -->
+        <dependency>
+            <groupId>wsdl4j</groupId>
+            <artifactId>wsdl4j</artifactId>
+        </dependency>
+        <!-- Runtime JAXB: el JDK ya no incluye la implementación -->
+        <dependency>
+            <groupId>org.glassfish.jaxb</groupId>
+            <artifactId>jaxb-runtime</artifactId>
+        </dependency>
+
+        <!-- ── Base de datos (JPA / Hibernate) ── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
         <dependency>
             <groupId>com.mysql</groupId>

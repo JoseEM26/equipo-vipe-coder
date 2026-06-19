@@ -2,15 +2,18 @@ package cibertec.edu.services;
 
 import cibertec.edu.dto.response.ResultadoEncuestaDto;
 import cibertec.edu.dto.response.ResultadoOpcionDto;
+import cibertec.edu.entity.Encuesta;
 import cibertec.edu.entity.EstadoEncuesta;
 import cibertec.edu.entity.UsuarioPrincipal;
+import cibertec.edu.entity.Voto;
 import cibertec.edu.exception.AccesoDenegadoException;
 import cibertec.edu.exception.ConflictoException;
 import cibertec.edu.exception.EstadoInvalidoException;
 import cibertec.edu.exception.RecursoNoEncontradoException;
 import cibertec.edu.repo.EncuestaRepository;
-import cibertec.edu.repo.EncuestaRepository.EncuestaRow;
+import cibertec.edu.repo.OpcionRepository;
 import cibertec.edu.repo.VotoRepository;
+import cibertec.edu.repo.projection.ResultadoOpcionView;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -36,24 +39,25 @@ public class VotoService {
 
     private final VotoRepository        votoRepo;
     private final EncuestaRepository    encuestaRepo;
+    private final OpcionRepository      opcionRepo;
     private final SimpMessagingTemplate messaging;
 
     @Transactional
     public ResultadoEncuestaDto votar(UUID encuestaId, UUID opcionId, UUID usuarioId) {
-        EncuestaRow encuesta = encuestaRepo.buscarPorId(encuestaId)
+        Encuesta encuesta = encuestaRepo.findById(encuestaId)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Encuesta no encontrada"));
 
-        if (!EstadoEncuesta.ACTIVA.valor().equals(encuesta.estado())) {
+        if (!EstadoEncuesta.ACTIVA.valor().equals(encuesta.getEstado())) {
             throw new EstadoInvalidoException("Solo se puede votar en encuestas activas");
         }
-        if (!encuestaRepo.existeOpcionEnEncuesta(opcionId, encuestaId)) {
+        if (!opcionRepo.existsByIdAndEncuesta_Id(opcionId, encuestaId)) {
             throw new RecursoNoEncontradoException("La opción indicada no pertenece a esta encuesta");
         }
-        if (votoRepo.yaVoto(encuestaId, usuarioId)) {
+        if (votoRepo.existsByEncuestaIdAndUsuarioId(encuestaId, usuarioId)) {
             throw new ConflictoException("Ya has votado en esta encuesta");
         }
 
-        votoRepo.registrar(encuestaId, usuarioId, opcionId);
+        votoRepo.save(new Voto(encuestaId, usuarioId, opcionId));
 
         // El votante recibe su snapshot en la respuesta REST; los admins, en vivo.
         ResultadoEncuestaDto resultado = construirResultado(encuesta);
@@ -69,23 +73,53 @@ public class VotoService {
      */
     @Transactional(readOnly = true)
     public ResultadoEncuestaDto resultados(UUID encuestaId, UsuarioPrincipal principal) {
-        EncuestaRow encuesta = encuestaRepo.buscarPorId(encuestaId)
+        Encuesta encuesta = encuestaRepo.findById(encuestaId)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Encuesta no encontrada"));
 
         boolean admin      = "admin".equalsIgnoreCase(principal.rol());
-        boolean finalizada = EstadoEncuesta.FINALIZADA.valor().equals(encuesta.estado());
+        boolean finalizada = EstadoEncuesta.FINALIZADA.valor().equals(encuesta.getEstado());
 
-        if (!admin && !finalizada && !votoRepo.yaVoto(encuestaId, principal.id())) {
+        if (!admin && !finalizada
+                && !votoRepo.existsByEncuestaIdAndUsuarioId(encuestaId, principal.id())) {
             throw new AccesoDenegadoException(
                     "Debes votar en esta encuesta para ver los resultados");
         }
         return construirResultado(encuesta);
     }
 
-    private ResultadoEncuestaDto construirResultado(EncuestaRow encuesta) {
-        List<ResultadoOpcionDto> opciones = votoRepo.resultados(encuesta.id());
+    /**
+     * Resultados públicos para el canal SOAP (sin autenticación).
+     * Solo se exponen cuando la encuesta ha finalizado, igual que la regla
+     * de visibilidad pública de {@link #resultados}.
+     */
+    @Transactional(readOnly = true)
+    public ResultadoEncuestaDto resultadosPublicos(UUID encuestaId) {
+        Encuesta encuesta = encuestaRepo.findById(encuestaId)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Encuesta no encontrada"));
+
+        if (!EstadoEncuesta.FINALIZADA.valor().equals(encuesta.getEstado())) {
+            throw new AccesoDenegadoException(
+                    "Los resultados solo son públicos cuando la encuesta ha finalizado");
+        }
+        return construirResultado(encuesta);
+    }
+
+    private ResultadoEncuestaDto construirResultado(Encuesta encuesta) {
+        List<ResultadoOpcionDto> opciones = votoRepo.resultados(encuesta.getId().toString())
+                .stream()
+                .map(VotoService::mapOpcion)
+                .toList();
         long total = opciones.stream().mapToLong(ResultadoOpcionDto::totalVotos).sum();
         return new ResultadoEncuestaDto(
-                encuesta.id(), encuesta.titulo(), encuesta.estado(), total, opciones);
+                encuesta.getId(), encuesta.getTitulo(), encuesta.getEstado(), total, opciones);
+    }
+
+    private static ResultadoOpcionDto mapOpcion(ResultadoOpcionView v) {
+        return new ResultadoOpcionDto(
+                UUID.fromString(v.getOpcionId()),
+                v.getTexto(),
+                v.getOrden(),
+                v.getTotalVotos(),
+                v.getPorcentaje() == null ? 0.0 : v.getPorcentaje());
     }
 }

@@ -1,75 +1,54 @@
 package cibertec.edu.repo;
 
-import cibertec.edu.dto.response.ResultadoOpcionDto;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.stereotype.Repository;
+import cibertec.edu.entity.Voto;
+import cibertec.edu.repo.projection.ConteoView;
+import cibertec.edu.repo.projection.ResultadoOpcionView;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
-import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Acceso a datos de votos y resultados agregados.
- * Los resultados se leen de la vista v_resultados_encuesta.
- */
-@Repository
-public class VotoRepository {
-
-    private final NamedParameterJdbcTemplate jdbc;
-
-    public VotoRepository(NamedParameterJdbcTemplate jdbc) {
-        this.jdbc = jdbc;
-    }
+/** Repositorio Spring Data JPA para votos y resultados agregados. */
+public interface VotoRepository extends JpaRepository<Voto, UUID> {
 
     /** ¿El usuario ya votó en esta encuesta? */
-    public boolean yaVoto(UUID encuestaId, UUID usuarioId) {
-        String sql = """
-                SELECT EXISTS(
-                    SELECT 1 FROM votos
-                    WHERE encuesta_id = :encuestaId AND usuario_id = :usuarioId
-                )
-                """;
-        Boolean r = jdbc.queryForObject(sql, new MapSqlParameterSource()
-                .addValue("encuestaId", encuestaId.toString())
-                .addValue("usuarioId",  usuarioId.toString()), Boolean.class);
-        return Boolean.TRUE.equals(r);
-    }
+    boolean existsByEncuestaIdAndUsuarioId(UUID encuestaId, UUID usuarioId);
 
     /**
-     * Registra un voto. La unicidad (un voto por usuario/encuesta) la garantiza
-     * el constraint uq_votos_usuario_encuesta; el trigger valida encuesta activa
-     * y opción perteneciente como última línea de defensa.
+     * Resultados agregados de una encuesta leídos de la vista
+     * v_resultados_encuesta, mapeados a una proyección por interfaz.
+     * (encuestaId va como String porque la columna es CHAR(36).)
      */
-    public void registrar(UUID encuestaId, UUID usuarioId, UUID opcionId) {
-        String sql = """
-                INSERT INTO votos (id, encuesta_id, usuario_id, opcion_id)
-                VALUES (:id, :encuestaId, :usuarioId, :opcionId)
-                """;
-        jdbc.update(sql, new MapSqlParameterSource()
-                .addValue("id",         UUID.randomUUID().toString())
-                .addValue("encuestaId", encuestaId.toString())
-                .addValue("usuarioId",  usuarioId.toString())
-                .addValue("opcionId",   opcionId.toString()));
-    }
+    @Query(value = """
+            SELECT opcion_id     AS opcionId,
+                   opcion_texto  AS texto,
+                   orden         AS orden,
+                   total_votos   AS totalVotos,
+                   porcentaje    AS porcentaje
+            FROM   v_resultados_encuesta
+            WHERE  encuesta_id = :encuestaId
+            ORDER BY orden
+            """, nativeQuery = true)
+    List<ResultadoOpcionView> resultados(@Param("encuestaId") String encuestaId);
 
-    /** Resultados agregados (todas las opciones, incluso con 0 votos). */
-    public List<ResultadoOpcionDto> resultados(UUID encuestaId) {
-        String sql = """
-                SELECT opcion_id, opcion_texto, orden, total_votos, porcentaje
-                FROM   v_resultados_encuesta
-                WHERE  encuesta_id = :encuestaId
-                ORDER BY orden
-                """;
-        return jdbc.query(sql, new MapSqlParameterSource("encuestaId", encuestaId.toString()),
-                (rs, n) -> {
-                    BigDecimal pct = rs.getBigDecimal("porcentaje");
-                    return new ResultadoOpcionDto(
-                            UUID.fromString(rs.getString("opcion_id")),
-                            rs.getString("opcion_texto"),
-                            rs.getInt("orden"),
-                            rs.getLong("total_votos"),
-                            pct == null ? 0.0 : pct.doubleValue());
-                });
-    }
+    /** Conteo de votos por encuesta (proyección por interfaz). */
+    @Query("""
+            SELECT v.encuestaId AS id, COUNT(v) AS total
+            FROM   Voto v
+            WHERE  v.encuestaId IN :ids
+            GROUP BY v.encuestaId
+            """)
+    List<ConteoView> contarPorEncuesta(@Param("ids") Collection<UUID> ids);
+
+    /** Ids de las encuestas (dentro del conjunto dado) en las que votó el usuario. */
+    @Query("""
+            SELECT DISTINCT v.encuestaId
+            FROM   Voto v
+            WHERE  v.usuarioId = :usuarioId AND v.encuestaId IN :ids
+            """)
+    List<UUID> encuestasVotadasPor(@Param("usuarioId") UUID usuarioId,
+                                   @Param("ids") Collection<UUID> ids);
 }

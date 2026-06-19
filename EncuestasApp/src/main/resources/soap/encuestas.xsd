@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:tns="http://votaciones.cibertec.edu/soap"
+           targetNamespace="http://votaciones.cibertec.edu/soap"
+           elementFormDefault="qualified">
+
+    <!-- Petición: id de la encuesta a consultar -->
+    <xs:element name="ObtenerResultadosRequest">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="encuestaId" type="xs:string"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+
+    <!-- Respuesta: resultados agregados de la encuesta -->
+    <xs:element name="ObtenerResultadosResponse">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="resultado" type="tns:ResultadoEncuesta"/>
+            </xs:sequence>
+        </xs:complexType>
+    </xs:element>
+
+    <xs:complexType name="ResultadoEncuesta">
+        <xs:sequence>
+            <xs:element name="encuestaId" type="xs:string"/>
+            <xs:element name="titulo"     type="xs:string"/>
+            <xs:element name="estado"     type="xs:string"/>
+            <xs:element name="totalVotos" type="xs:long"/>
+            <xs:element name="opciones"   type="tns:ResultadoOpcion"
+                        minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:complexType name="ResultadoOpcion">
+        <xs:sequence>
+            <xs:element name="opcionId"   type="xs:string"/>
+            <xs:element name="texto"      type="xs:string"/>
+            <xs:element name="orden"      type="xs:int"/>
+            <xs:element name="totalVotos" type="xs:long"/>
+            <xs:element name="porcentaje" type="xs:double"/>
+        </xs:sequence>
+    </xs:complexType>
+
+</xs:schema>

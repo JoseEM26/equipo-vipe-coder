@@ -61,6 +61,9 @@ public class SecurityConfig {
                         // WebSocket handshake (el token se valida dentro del handler)
                         .requestMatchers("/ws/**").permitAll()
 
+                        // Servicio SOAP: resultados públicos (solo encuestas finalizadas)
+                        .requestMatchers("/soap/**").permitAll()
+
                         // Health check (útil para load balancers en la nube)
                         .requestMatchers("/actuator/health").permitAll()
 

@@ -19,6 +19,17 @@ spring:
       # Verifica que la conexión esté viva antes de usarla
       connection-test-query: SELECT 1
 
+  # ── JPA / Hibernate ────────────────────────────────────────
+  # El esquema lo gestiona Flyway (tablas, triggers, vistas), por eso
+  # Hibernate NO genera ni valida DDL: solo mapea las tablas existentes.
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+
   # ── Migraciones Flyway ─────────────────────────────────────
   flyway:
     enabled: true

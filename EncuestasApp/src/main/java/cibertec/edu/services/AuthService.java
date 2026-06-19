@@ -4,9 +4,11 @@ import cibertec.edu.auth.JwtUtil;
 import cibertec.edu.dto.request.LoginRequest;
 import cibertec.edu.dto.request.RegistroRequest;
 import cibertec.edu.dto.response.AuthResponse;
+import cibertec.edu.entity.Usuario;
 import cibertec.edu.exception.ConflictoException;
 import cibertec.edu.exception.CredencialesInvalidasException;
-import cibertec.edu.repo.AuthRepository;
+import cibertec.edu.repo.UsuarioRepository;
+import cibertec.edu.repo.projection.UsuarioAuthView;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -18,7 +20,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AuthService {
 
-    private final AuthRepository authRepository;
+    private final UsuarioRepository usuarioRepository;
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
 
@@ -28,41 +30,40 @@ public class AuthService {
     // ── Login ─────────────────────────────────────────────────
 
     public AuthResponse login(LoginRequest request) {
-        // 1. Buscar usuario por email
-        AuthRepository.UsuarioAuth usuario = authRepository
-                .findByEmail(request.getEmail())
+        // 1. Buscar usuario activo por email (proyección por interfaz)
+        UsuarioAuthView usuario = usuarioRepository
+                .findByEmailAndActivoTrue(request.getEmail())
                 .orElseThrow(() -> new CredencialesInvalidasException(
                         "Email o contraseña incorrectos"));
                         // Mensaje genérico intencionalmente: no revelar si el email existe
 
         // 2. Verificar contraseña
-        if (!passwordEncoder.matches(request.getPassword(), usuario.passwordHash())) {
+        if (!passwordEncoder.matches(request.getPassword(), usuario.getPasswordHash())) {
             throw new CredencialesInvalidasException("Email o contraseña incorrectos");
         }
 
         // 3. Generar token y devolver respuesta
-        return construirRespuesta(usuario.id(), usuario.nombre(), usuario.email(), usuario.rol());
+        return construirRespuesta(usuario.getId(), usuario.getNombre(),
+                usuario.getEmail(), usuario.getRol());
     }
 
     // ── Registro ──────────────────────────────────────────────
 
     public AuthResponse registro(RegistroRequest request) {
         // 1. Verificar que el email no esté en uso
-        if (authRepository.existeEmail(request.getEmail())) {
+        if (usuarioRepository.existsByEmail(request.getEmail())) {
             throw new ConflictoException("El email ya está registrado");
         }
 
-        // 2. Hashear contraseña
-        String passwordHash = passwordEncoder.encode(request.getPassword());
-
-        // 3. Persistir usuario
-        UUID nuevoId = authRepository.registrar(
+        // 2. Hashear contraseña y persistir (rol 'usuario' por defecto)
+        Usuario usuario = new Usuario(
                 request.getNombre(),
                 request.getEmail(),
-                passwordHash
-        );
+                passwordEncoder.encode(request.getPassword()));
+        Usuario guardado = usuarioRepository.save(usuario);
 
-        return construirRespuesta(nuevoId, request.getNombre(), request.getEmail(), "usuario");
+        return construirRespuesta(guardado.getId(), guardado.getNombre(),
+                guardado.getEmail(), guardado.getRol());
     }
 
     // ── Interno ───────────────────────────────────────────────

@@ -11,74 +11,113 @@ import { ApiError } from '../../core/models/api.models';
   imports: [ReactiveFormsModule, RouterLink],
   template: `
     <div class="auth-page">
-      <div class="auth-card card">
-        <div class="auth-logo">
-          <h1>VotaYa</h1>
-          <p>Crear cuenta nueva</p>
-        </div>
 
-        @if (error) {
-          <div class="alert alert-error">{{ error }}</div>
-        }
+      <!-- Panel izquierdo: branding -->
+      <div class="auth-panel-left">
+        <div class="brand-icon">🗳️</div>
+        <h1>VotaYa</h1>
+        <p>Creá tu cuenta y empezá a participar en votaciones en tiempo real</p>
 
-        <form [formGroup]="form" (ngSubmit)="submit()">
-          <div class="form-group">
-            <label for="nombre">Nombre completo</label>
-            <input
-              id="nombre"
-              type="text"
-              formControlName="nombre"
-              class="form-control"
-              [class.is-invalid]="touched('nombre')"
-              placeholder="Tu nombre"
-              autocomplete="name"
-            />
-            @if (touched('nombre')) {
-              <div class="form-error">El nombre es obligatorio</div>
-            }
+        <div class="auth-features">
+          <div class="auth-feature">
+            <span class="auth-feature-icon">🚀</span>
+            <span class="auth-feature-text">Acceso inmediato a encuestas activas</span>
           </div>
-
-          <div class="form-group">
-            <label for="email">Correo electrónico</label>
-            <input
-              id="email"
-              type="email"
-              formControlName="email"
-              class="form-control"
-              [class.is-invalid]="touched('email')"
-              placeholder="tu@email.com"
-              autocomplete="email"
-            />
-            @if (touched('email')) {
-              <div class="form-error">Ingresá un email válido</div>
-            }
+          <div class="auth-feature">
+            <span class="auth-feature-icon">📈</span>
+            <span class="auth-feature-text">Ve los resultados al instante</span>
           </div>
-
-          <div class="form-group">
-            <label for="password">Contraseña</label>
-            <input
-              id="password"
-              type="password"
-              formControlName="password"
-              class="form-control"
-              [class.is-invalid]="touched('password')"
-              placeholder="Mínimo 8 caracteres"
-              autocomplete="new-password"
-            />
-            @if (touched('password')) {
-              <div class="form-error">Mínimo 8 caracteres</div>
-            }
+          <div class="auth-feature">
+            <span class="auth-feature-icon">🎯</span>
+            <span class="auth-feature-text">Tu voto es anónimo y seguro</span>
           </div>
-
-          <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center" [disabled]="loading">
-            {{ loading ? 'Creando cuenta...' : 'Crear cuenta' }}
-          </button>
-        </form>
-
-        <div class="auth-footer">
-          ¿Ya tenés cuenta? <a routerLink="/login">Iniciar sesión</a>
         </div>
       </div>
+
+      <!-- Panel derecho: formulario -->
+      <div class="auth-panel-right">
+        <div class="auth-form-wrap">
+
+          <div class="auth-logo">
+            <div class="logo-badge">
+              <span class="logo-dot"></span>
+              <span class="logo-label">VotaYa</span>
+            </div>
+            <h2>Crear cuenta</h2>
+            <p>Completá tus datos para registrarte</p>
+          </div>
+
+          @if (error) {
+            <div class="alert alert-error">{{ error }}</div>
+          }
+
+          <form [formGroup]="form" (ngSubmit)="submit()">
+            <div class="form-group">
+              <label for="nombre">Nombre completo</label>
+              <input
+                id="nombre"
+                type="text"
+                formControlName="nombre"
+                class="form-control"
+                [class.is-invalid]="touched('nombre')"
+                placeholder="Tu nombre"
+                autocomplete="name"
+              />
+              @if (touched('nombre')) {
+                <div class="form-error">El nombre es obligatorio</div>
+              }
+            </div>
+
+            <div class="form-group">
+              <label for="email">Correo electrónico</label>
+              <input
+                id="email"
+                type="email"
+                formControlName="email"
+                class="form-control"
+                [class.is-invalid]="touched('email')"
+                placeholder="tu@email.com"
+                autocomplete="email"
+              />
+              @if (touched('email')) {
+                <div class="form-error">Ingresá un email válido</div>
+              }
+            </div>
+
+            <div class="form-group">
+              <label for="password">Contraseña</label>
+              <input
+                id="password"
+                type="password"
+                formControlName="password"
+                class="form-control"
+                [class.is-invalid]="touched('password')"
+                placeholder="Mínimo 8 caracteres"
+                autocomplete="new-password"
+              />
+              @if (touched('password')) {
+                <div class="form-error">Mínimo 8 caracteres</div>
+              }
+            </div>
+
+            <button
+              type="submit"
+              class="btn btn-primary btn-lg"
+              style="width:100%;margin-top:4px"
+              [disabled]="loading"
+            >
+              {{ loading ? 'Creando cuenta...' : 'Crear cuenta' }}
+            </button>
+          </form>
+
+          <div class="auth-divider">o</div>
+
+          <div class="auth-footer">
+            ¿Ya tenés cuenta?&nbsp;<a routerLink="/login">Iniciar sesión</a>
+          </div>
+        </div>
+      </div>
+
     </div>
   `,
 })

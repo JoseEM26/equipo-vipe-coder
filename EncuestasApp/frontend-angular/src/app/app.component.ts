@@ -10,8 +10,9 @@ import { AuthService } from './core/auth/auth.service';
     @if (auth.isAuthenticated()) {
       <nav class="navbar">
         <div class="navbar-inner">
+
           <div class="nav-brand">
-            <a routerLink="/">VotaYa</a>
+            <a routerLink="/">🗳️ VotaYa</a>
           </div>
 
           <div class="nav-links">
@@ -24,9 +25,13 @@ import { AuthService } from './core/auth/auth.service';
           </div>
 
           <div class="nav-user">
-            <span>{{ auth.session()?.nombre }}</span>
+            <span class="nav-name">{{ auth.session()?.nombre }}</span>
+            <div class="nav-avatar" [title]="auth.session()?.email ?? ''">
+              {{ inicial() }}
+            </div>
             <button class="btn btn-outline btn-sm" (click)="logout()">Salir</button>
           </div>
+
         </div>
       </nav>
     }
@@ -37,6 +42,10 @@ import { AuthService } from './core/auth/auth.service';
 export class AppComponent {
   protected auth = inject(AuthService);
   private router = inject(Router);
+
+  inicial(): string {
+    return (this.auth.session()?.nombre ?? '?').charAt(0).toUpperCase();
+  }
 
   logout(): void {
     this.auth.logout();

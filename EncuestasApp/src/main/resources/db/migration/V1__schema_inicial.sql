@@ -1,5 +1,24 @@
-Create database votaciones
+-- ============================================================
+--  SISTEMA DE VOTACIONES EN TIEMPO REAL
+--  Base de datos MySQL 8.0  (puerto desde PostgreSQL)
+-- ============================================================
+--  Requisitos:
+--    * MySQL 8.0.16+  (CHECK constraints, DEFAULT (UUID()),
+--      funciones de ventana, múltiples triggers por evento).
+--  Notas de portabilidad frente a la versión PostgreSQL:
+--    * UUID            -> CHAR(36)        (gen_random_uuid() -> UUID())
+--    * TIMESTAMPTZ     -> DATETIME        (sin zona horaria nativa)
+--    * ENUM type       -> ENUM inline en la columna
+--    * COMMENT ON ...  -> COMMENT inline
+--    * RAISE EXCEPTION -> SIGNAL SQLSTATE '45000'
+--    * Lógica de varios triggers BEFORE UPDATE consolidada en uno solo.
+-- ============================================================
 
+-- (En MySQL no hace falta ninguna extensión; UUID() es nativo.)
+
+-- ============================================================
+--  TABLA: usuarios
+-- ============================================================
 
 CREATE TABLE usuarios (
     id             CHAR(36)      NOT NULL DEFAULT (UUID()),
@@ -283,6 +302,9 @@ ORDER BY vt.votado_en DESC;
 
 -- ============================================================
 --  DATOS DE EJEMPLO
+--  NOTA: los password_hash son PLACEHOLDERS, no son bcrypt válidos.
+--        Estos usuarios NO podrán iniciar sesión hasta reemplazarlos
+--        por hashes bcrypt reales (BCryptPasswordEncoder, strength 12).
 -- ============================================================
 
 -- Usuarios

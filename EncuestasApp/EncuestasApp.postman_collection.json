@@ -1,0 +1,472 @@
+{
+  "info": {
+    "name": "EncuestasApp - Votaciones API",
+    "description": "Colección completa de la API de Votaciones en Tiempo Real.\n\nStack: Spring Boot 3 + Spring Data JPA (Specifications + proyecciones por interfaz), Spring Security (JWT), WebSocket/STOMP (tiempo real) y SOAP (Spring-WS). MySQL + Flyway.\n\nIncluye:\n- Auth (login / registro) — guardan el JWT automáticamente en la variable {{token}}.\n- Encuestas (admin) — crear, listar, actualizar, cambiar estado, eliminar.\n- Encuestas (autenticado) — activas, finalizadas, detalle.\n- Votación — votar y resultados.\n- SOAP — obtener resultados (encuestas finalizadas) + WSDL.\n\nCada request lleva tests básicos (assert de status code).\n\nFlujo recomendado:\n1. 'Login' (ya trae el admin admin@admin.com / 12345678) -> guarda {{token}}.\n2. 'Crear encuesta' (guarda {{encuestaId}} y {{opcionId}}).\n3. 'Cambiar estado -> activa', luego 'Votar', luego 'Resultados'.\n4. 'Cambiar estado -> finalizada' para probar el endpoint SOAP.\n\nVariables: baseUrl, token, encuestaId, opcionId.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{token}}", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "encuestaId", "value": "", "type": "string" },
+    { "key": "opcionId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Registro",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "  const res = pm.response.json();",
+                  "  pm.collectionVariables.set('token', res.token);",
+                  "  pm.test('Devuelve token', () => pm.expect(res.token).to.be.a('string'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Usuario Demo\",\n  \"email\": \"demo@example.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/registro",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "auth", "registro" ]
+            },
+            "description": "Crea una cuenta (rol 'usuario' por defecto) y devuelve un JWT. 201 Created."
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const res = pm.response.json();",
+                  "  pm.collectionVariables.set('token', res.token);",
+                  "  pm.test('Devuelve token', () => pm.expect(res.token).to.be.a('string'));",
+                  "  console.log('Logueado como', res.email, '(' + res.rol + ')');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@admin.com\",\n  \"password\": \"12345678\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "auth", "login" ]
+            },
+            "description": "Login. Pre-rellenado con el admin (admin@admin.com / 12345678). Devuelve JWT con rol admin y lo guarda en {{token}}."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Encuestas (admin)",
+      "item": [
+        {
+          "name": "Crear encuesta",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "  const res = pm.response.json();",
+                  "  pm.collectionVariables.set('encuestaId', res.id);",
+                  "  if (res.opciones && res.opciones.length) {",
+                  "    pm.collectionVariables.set('opcionId', res.opciones[0].id);",
+                  "  }",
+                  "  pm.test('Estado inicial borrador', () => pm.expect(res.estado).to.eql('borrador'));",
+                  "  console.log('encuestaId =', res.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"titulo\": \"Mejor lenguaje 2026\",\n  \"descripcion\": \"Encuesta de prueba\",\n  \"opciones\": [\"Java\", \"Python\", \"Go\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/encuestas",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "encuestas" ]
+            },
+            "description": "Crea una encuesta en estado 'borrador'. Solo ADMIN. Guarda encuestaId y opcionId. 201 Created."
+          }
+        },
+        {
+          "name": "Listar todas (panel admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/encuestas",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "encuestas" ]
+            },
+            "description": "Lista todas las encuestas. Solo ADMIN."
+          }
+        },
+        {
+          "name": "Actualizar encuesta",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"titulo\": \"Mejor lenguaje 2026 (editado)\",\n  \"descripcion\": \"Descripcion actualizada\",\n  \"opciones\": [\"Java\", \"Python\", \"Go\", \"Rust\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/encuestas/{{encuestaId}}",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "encuestas", "{{encuestaId}}" ]
+            },
+            "description": "Edita una encuesta. Solo ADMIN y solo si está en 'borrador'."
+          }
+        },
+        {
+          "name": "Cambiar estado -> activa",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Estado = activa', () => pm.expect(pm.response.json().estado).to.eql('activa'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"activa\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/encuestas/{{encuestaId}}/estado",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "encuestas", "{{encuestaId}}", "estado" ]
+            },
+            "description": "Activa la encuesta para poder votar. Solo ADMIN. Transiciones válidas: borrador -> activa -> finalizada."
+          }
+        },
+        {
+          "name": "Cambiar estado -> finalizada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Estado = finalizada', () => pm.expect(pm.response.json().estado).to.eql('finalizada'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"finalizada\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/encuestas/{{encuestaId}}/estado",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "encuestas", "{{encuestaId}}", "estado" ]
+            },
+            "description": "Finaliza la encuesta. Necesario para que el endpoint SOAP exponga los resultados públicamente."
+          }
+        },
+        {
+          "name": "Eliminar encuesta",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/encuestas/{{encuestaId}}",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "encuestas", "{{encuestaId}}" ]
+            },
+            "description": "Elimina una encuesta. Solo ADMIN y solo si está en 'borrador'. 204 No Content."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Encuestas (autenticado)",
+      "item": [
+        {
+          "name": "Activas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/encuestas/activas",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "encuestas", "activas" ]
+            },
+            "description": "Encuestas activas disponibles, con marca de 'ya votó'. Admin o usuario."
+          }
+        },
+        {
+          "name": "Finalizadas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/encuestas/finalizadas",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "encuestas", "finalizadas" ]
+            },
+            "description": "Admin: todas las finalizadas. Usuario: solo en las que participó (Specification participoUsuario)."
+          }
+        },
+        {
+          "name": "Detalle",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Trae opciones', () => pm.expect(pm.response.json().opciones).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/encuestas/{{encuestaId}}",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "encuestas", "{{encuestaId}}" ]
+            },
+            "description": "Detalle de una encuesta con sus opciones. Admin o usuario."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Votación",
+      "item": [
+        {
+          "name": "Votar",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Total de votos > 0', () => pm.expect(pm.response.json().totalVotos).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"opcionId\": \"{{opcionId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/encuestas/{{encuestaId}}/votar",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "encuestas", "{{encuestaId}}", "votar" ]
+            },
+            "description": "Emite un voto en la encuesta (debe estar 'activa'). Autenticado. 201 Created. Tras votar, los admins reciben los resultados en vivo por WebSocket en /topic/admin/encuesta/{id}."
+          }
+        },
+        {
+          "name": "Resultados (REST)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/encuestas/{{encuestaId}}/resultados",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "api", "encuestas", "{{encuestaId}}", "resultados" ]
+            },
+            "description": "Resultados agregados (vía proyección por interfaz sobre la vista). Admin: siempre. Usuario: si ya votó o si la encuesta finalizó."
+          }
+        }
+      ]
+    },
+    {
+      "name": "SOAP",
+      "item": [
+        {
+          "name": "WSDL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Es un WSDL', () => pm.expect(pm.response.text()).to.include('wsdl:definitions'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/soap/encuestas.wsdl",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "soap", "encuestas.wsdl" ]
+            },
+            "description": "Contrato WSDL del servicio SOAP."
+          }
+        },
+        {
+          "name": "Obtener resultados (SOAP)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Trae resultado', () => pm.expect(pm.response.text()).to.include('ObtenerResultadosResponse'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "text/xml; charset=utf-8" } ],
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "xml" } },
+              "raw": "<soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:enc=\"http://votaciones.cibertec.edu/soap\">\n  <soapenv:Body>\n    <enc:ObtenerResultadosRequest>\n      <enc:encuestaId>{{encuestaId}}</enc:encuestaId>\n    </enc:ObtenerResultadosRequest>\n  </soapenv:Body>\n</soapenv:Envelope>"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/soap",
+              "host": [ "{{baseUrl}}" ],
+              "path": [ "soap" ]
+            },
+            "description": "Devuelve los resultados de una encuesta FINALIZADA. Si la encuesta no existe o no está finalizada, devuelve un SOAP Fault (HTTP 500). No requiere autenticación."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 package cibertec.edu.auth;
 
+import cibertec.edu.entity.UsuarioPrincipal;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

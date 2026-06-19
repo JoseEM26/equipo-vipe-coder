@@ -1,5 +1,6 @@
-package cibertec.edu.auth;
+package cibertec.edu.controllers;
 
+import cibertec.edu.services.AuthService;
 import cibertec.edu.dto.request.LoginRequest;
 import cibertec.edu.dto.request.RegistroRequest;
 import cibertec.edu.dto.response.AuthResponse;

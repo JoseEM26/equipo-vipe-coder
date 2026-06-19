@@ -8,7 +8,7 @@ echo.
 
 set CONFLICTOS=0
 
-call :checkPort 3306 "MySQL (BD)"
+call :checkPort 3307 "MySQL host (docker-compose)"
 call :checkPort 8080 "Backend Spring Boot"
 call :checkPort 4200 "Frontend Angular"
 

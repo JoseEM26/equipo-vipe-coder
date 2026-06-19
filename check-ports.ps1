@@ -2,20 +2,20 @@
 .SYNOPSIS
     Verifica que los puertos requeridos por docker-compose estén libres.
 .DESCRIPTION
-    Comprueba los puertos 3306 (MySQL), 8080 (Backend) y 4200 (Frontend).
+    Comprueba los puertos 3307 (MySQL host), 8080 (Backend) y 4200 (Frontend).
     Si alguno está ocupado, muestra el proceso que lo usa y sale con código 1.
 .EXAMPLE
     .\check-ports.ps1
-    .\check-ports.ps1 -Ports 3306,8080          # solo esos puertos
+    .\check-ports.ps1 -Ports 3307,8080          # solo esos puertos
     .\check-ports.ps1 -Kill                      # intenta matar procesos que bloquean
 #>
 param(
-    [int[]]  $Ports = @(3306, 8080, 4200),
+    [int[]]  $Ports = @(3307, 8080, 4200),
     [switch] $Kill
 )
 
 $services = @{
-    3306 = "MySQL (BD)"
+    3307 = "MySQL host (docker-compose)"
     8080 = "Backend Spring Boot"
     4200 = "Frontend Angular"
 }

@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Cachea node_modules: solo se reinstala si package.json cambia
 COPY package*.json ./
-RUN npm ci --silent
+RUN npm install --silent
 
 # Compila la app en modo producción
 COPY . .

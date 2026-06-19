@@ -1,0 +1,6 @@
+target/
+.idea/
+*.iml
+frontend-angular/node_modules/
+frontend-angular/dist/
+*.postman_collection.json

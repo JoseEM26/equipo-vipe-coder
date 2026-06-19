@@ -1,0 +1,62 @@
+services:
+
+  # ── Base de datos ──────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: votaciones-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-12345}
+      MYSQL_DATABASE: ${DB_NAME:-votaciones}
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_PASSWORD:-12345}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # ── Backend Spring Boot ────────────────────────────────────────────────────
+  # Flyway aplica V1 (schema + seed) y V2 al arrancar.
+  # Si la BD ya existe con datos, Flyway salta las migraciones ya aplicadas.
+  backend:
+    build:
+      context: ./EncuestasApp
+      dockerfile: Dockerfile
+    container_name: votaciones-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-votaciones}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-12345}
+      PORT: 8080
+      JWT_SECRET: ${JWT_SECRET:-c2VjcmV0b3NlZ3Vyb3BhcmF2b3RhY2lvbmVzZW50aWVtcG9yZWFsMTIzNDU2Nzg=}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
+  # ── Frontend Angular ───────────────────────────────────────────────────────
+  # Descomentar cuando el proyecto Angular esté inicializado
+  # (necesita package.json, angular.json y ng build configurado).
+  #
+  # frontend:
+  #   build:
+  #     context: ./EncuestasApp/frontend-angular
+  #     dockerfile: Dockerfile
+  #   container_name: votaciones-frontend
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - backend
+  #   ports:
+  #     - "${FRONTEND_PORT:-4200}:80"
+
+volumes:
+  mysql_data:

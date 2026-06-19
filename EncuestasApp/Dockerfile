@@ -1,17 +1,25 @@
+# syntax=docker/dockerfile:1
+
 # ── Etapa 1: compilación ──────────────────────────────────────────────────
 # Si la imagen maven:3.9-eclipse-temurin-25 no está disponible,
-# cambia 25 por 21 (LTS) y ajusta <java.version> en pom.xml si es necesario.
+# cambia 25 por 21 (LTS) y ajusta <java.version> en pom.xml.
 FROM maven:3.9-eclipse-temurin-25 AS build
 
 WORKDIR /app
 
-# Descargar dependencias primero (capa cacheada mientras pom.xml no cambie)
+# Copiar solo el pom.xml primero para cachear dependencias independientemente
+# del código fuente. Si el pom.xml no cambia, este paso no se repite.
 COPY pom.xml .
-RUN mvn dependency:go-offline -B -q
 
-# Compilar el proyecto
+# --mount=type=cache persiste ~/.m2 entre builds en BuildKit (Docker Desktop lo
+# tiene activo por defecto). Primera vez: descarga todo. Siguientes: usa caché.
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn dependency:go-offline -B -q
+
+# Copiar el código y compilar (también con caché de ~/.m2)
 COPY src ./src
-RUN mvn clean package -DskipTests -B -q
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn clean package -DskipTests -B -q
 
 # ── Etapa 2: imagen de ejecución ──────────────────────────────────────────
 FROM eclipse-temurin:25-jre

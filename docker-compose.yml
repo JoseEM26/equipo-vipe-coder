@@ -44,19 +44,16 @@ services:
       - "${APP_PORT:-8080}:8080"
 
   # ── Frontend Angular ───────────────────────────────────────────────────────
-  # Descomentar cuando el proyecto Angular esté inicializado
-  # (necesita package.json, angular.json y ng build configurado).
-  #
-  # frontend:
-  #   build:
-  #     context: ./EncuestasApp/frontend-angular
-  #     dockerfile: Dockerfile
-  #   container_name: votaciones-frontend
-  #   restart: unless-stopped
-  #   depends_on:
-  #     - backend
-  #   ports:
-  #     - "${FRONTEND_PORT:-4200}:80"
+  frontend:
+    build:
+      context: ./EncuestasApp/frontend-angular
+      dockerfile: Dockerfile
+    container_name: votaciones-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-4200}:80"
 
 volumes:
   mysql_data:
